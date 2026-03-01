@@ -24,6 +24,7 @@
 
   const trails = { 0: [], 1: [] };
   let impactStart = 0;
+  let isConnected = false;
 
   function resize() {
     canvas.width = window.innerWidth;
@@ -33,6 +34,7 @@
   resize();
 
   function setStatus(msg, ok) {
+    isConnected = ok;
     statusEl.textContent = msg;
     statusEl.className = ok ? "connected" : "disconnected";
   }
@@ -107,6 +109,61 @@
     ctx.fill();
   }
 
+  function drawAlignmentCross() {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const len = Math.min(canvas.width, canvas.height) * 0.15;
+    const gap = 8;
+
+    function crossPath() {
+      ctx.moveTo(cx - len, cy);
+      ctx.lineTo(cx - gap, cy);
+      ctx.moveTo(cx + gap, cy);
+      ctx.lineTo(cx + len, cy);
+      ctx.moveTo(cx, cy - len);
+      ctx.lineTo(cx, cy - gap);
+      ctx.moveTo(cx, cy + gap);
+      ctx.lineTo(cx, cy + len);
+    }
+
+    ctx.save();
+    ctx.lineCap = "round";
+
+    ctx.beginPath();
+    crossPath();
+    ctx.strokeStyle = "rgba(0, 255, 120, 0.5)";
+    ctx.lineWidth = 16;
+    ctx.shadowColor = "rgba(0, 255, 150, 0.8)";
+    ctx.shadowBlur = 25;
+    ctx.stroke();
+
+    ctx.beginPath();
+    crossPath();
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, gap, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0, 255, 120, 0.4)";
+    ctx.lineWidth = 12;
+    ctx.shadowColor = "rgba(0, 255, 150, 0.6)";
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, gap, 0, Math.PI * 2);
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   function drawImpact(nx, ny, progress) {
     const { x, y } = normToCanvas(nx, ny);
     const impact = config.impact || {};
@@ -165,6 +222,10 @@
       } else {
         impactStart = 0;
       }
+    }
+
+    if (!isConnected) {
+      drawAlignmentCross();
     }
 
     requestAnimationFrame(render);
