@@ -27,6 +27,23 @@ Web-based SFX projection for [open_beybladex_ar_core](https://github.com/Trafitt
 ## Query params
 
 - `?flipY=1` - Flip Y axis (for bottom projector projecting upward)
+- `?scale=0.85` - Scale the projection (default 1)
+- `?offsetX=0.1` / `?offsetY=-0.05` - Shift projection
+- `?rotate=5` - Rotate in degrees
+- `?calibrate=1` - Start with calibration overlay on
+
+### Calibration
+
+Press **C** to toggle calibration mode. A green circle appears — align it to your stadium rim using the keyboard:
+
+| Key | Action |
+|-----|--------|
+| Arrows | Move the projection |
+| + / - | Scale up / down |
+| R / E | Rotate CW / CCW |
+| Shift + any | Fine adjustment |
+
+The overlay shows a URL with your current settings. Copy it and use it next time so you don't have to re-calibrate.
 
 ## Project structure
 

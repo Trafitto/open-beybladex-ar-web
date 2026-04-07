@@ -10,35 +10,35 @@ var BEYBLADE_EFFECT_CONFIG = {
   /* Impact flash duration in milliseconds */
   impactDurationMs: 200,
 
-  /* Laser trail: beyblade id 0 (first) */
+  /* Laser trail: beyblade id 0 (first) - hot magenta */
   laserRed: {
-    core: "rgba(255, 50, 50, 1)",
-    glow: "rgba(255, 80, 80, 0.6)",
-    /* Color of the beyblade glow at current position */
-    beyGlow: "rgba(255, 80, 80, 1)"
+    core: "rgba(255, 0, 255, 1)",
+    glow: "rgba(255, 100, 255, 0.7)",
+    beyGlow: "rgba(255, 50, 255, 1)"
   },
 
-  /* Laser trail: beyblade id 1 (second) */
+  /* Laser trail: beyblade id 1 (second) - electric cyan */
   laserBlue: {
-    core: "rgba(80, 150, 255, 1)",
-    glow: "rgba(100, 180, 255, 0.6)",
-    beyGlow: "rgba(100, 180, 255, 1)"
+    core: "rgba(0, 255, 255, 1)",
+    glow: "rgba(100, 255, 255, 0.7)",
+    beyGlow: "rgba(50, 255, 255, 1)"
   },
 
-  /* Trail thickness: core base/peak width, glow base/peak width (in pixels) */
+  /* Trail thickness: core base/peak width, glow base/peak width (in pixels).
+   * Thicker values keep effects visible when projection focus is uneven. */
   trail: {
-    coreWidthMin: 1,
-    coreWidthMax: 2,
-    glowWidthMin: 5,
-    glowWidthMax: 8
+    coreWidthMin: 8,
+    coreWidthMax: 16,
+    glowWidthMin: 18,
+    glowWidthMax: 32
   },
 
   /* Collision impact: radiating spark lines (explosion-style) */
   impact: {
     radiusStart: 30,
     radiusEnd: 100,
-    rayCount: 16,
+    rayCount: 12,
     strokeColor: "rgba(255, 200, 100, 1)",
-    lineWidth: 1
+    lineWidth: 2
   }
 };
