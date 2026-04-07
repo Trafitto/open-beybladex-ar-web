@@ -5,7 +5,7 @@
  */
 var BEYBLADE_EFFECT_CONFIG = {
   /* Maximum number of points kept in the trail per beyblade (longer = longer trail) */
-  trailMaxLength: 15,
+  trailMaxLength: 18,
 
   /* Impact flash duration in milliseconds */
   impactDurationMs: 200,
