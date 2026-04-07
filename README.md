@@ -4,7 +4,7 @@ This project is heavily vibe-coded and still in the testing phase.
 
 Web-based SFX projection for [open_beybladex_ar_core](https://github.com/Trafitto/open-beybladex-ar-core). Receives tracking data via WebSocket and renders trails, glow, and impact effects for projector output.
 
-![](test_video_output.gif)
+![WIP demo](demo/demo_wip.gif)
 
 ## Setup
 
@@ -52,3 +52,7 @@ The overlay shows a URL with your current settings. Copy it and use it next time
 | `index.html` | Entry point |
 | `css/style.css` | Fullscreen canvas, status |
 | `js/app.js` | WebSocket client, trail/glow/impact rendering |
+
+## Early demos
+
+![](demo/test_video_output.gif)
