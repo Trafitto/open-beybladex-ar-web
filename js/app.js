@@ -27,6 +27,7 @@
         offsetY: calib.offsetY,
         scale:   calib.scale,
         rotate:  calib.rotate,
+        distort: calib.distort,
         flipX:   flipX,
         flipY:   flipY,
       }));
@@ -44,6 +45,11 @@
     rotate:  params.has("rotate")
       ? (parseFloat(params.get("rotate")) || 0) * Math.PI / 180
       : (saved.rotate ?? 0),
+    /* Radial distortion: compensates for the stadium bowl curvature.
+     * Positive = push outer points outward (pincushion), useful when
+     * the bowl makes projected rim markers fall short.
+     * Negative = pull outer points inward (barrel). */
+    distort: parseFloat(params.get("distort")) || saved.distort || 0,
   };
 
   /* Effect settings from js/config.js; falls back to defaults if config missing */
@@ -59,6 +65,8 @@
     impactCenter: { x: 0, y: 0, nx: 0, ny: 0 },
     pocketAngleRad: null,
     stadiumRelative: false,
+    referenceMarkers: [],
+    arenaRadiusPx: 0,
   };
 
   const trails = { 0: [], 1: [] };
@@ -66,6 +74,13 @@
   let isConnected = false;
   let lastTrailUpdate = 0;
   const TRAIL_STALE_MS = 6000;
+  let markerOnlyMode = false;
+
+  let lastMessageTime = 0;
+  let serverTimestamp = 0;
+  /* Fraction of velocity used for extrapolation (0 = disabled, 1 = full).
+   * Keep < 1 to avoid overshooting on sudden direction changes. */
+  const EXTRAPOLATION_FACTOR = 0.65;
 
   function clearTrails() {
     trails[0].length = 0;
@@ -91,13 +106,11 @@
       "scale=" + calib.scale.toFixed(2) +
       " offX=" + calib.offsetX.toFixed(2) +
       " offY=" + calib.offsetY.toFixed(2) +
-      " rot=" + deg +
-      (flipX ? " <b>flipX</b>" : "") +
+      " rot=" + deg;
+    if (calib.distort !== 0) info += " dist=" + calib.distort.toFixed(2);
+    info += (flipX ? " <b>flipX</b>" : "") +
       (flipY ? " <b>flipY</b>" : "");
     if (state.stadiumRelative) info += "<br>stadium-relative";
-    if (state.pocketAngleRad != null) {
-      info += " pocket=" + (state.pocketAngleRad * 180 / Math.PI).toFixed(1) + "deg";
-    }
     calibInfo.innerHTML = info;
   }
 
@@ -106,8 +119,24 @@
     const h = canvas.height;
     const side = Math.min(w, h);
 
-    let dx = (nx - 0.5) * calib.scale * side;
-    let dy = (ny - 0.5) * calib.scale * side;
+    var cx = nx - 0.5;
+    var cy = ny - 0.5;
+
+    /* Radial distortion correction for bowl-shaped stadium.
+     * Uses linear radial term for strong visible effect:
+     *   r' = r * (1 + k * r)   where r = distance from center (0..~0.7)
+     * k > 0 pushes rim outward; k < 0 pulls it inward. */
+    if (calib.distort !== 0) {
+      var r = Math.sqrt(cx * cx + cy * cy);
+      if (r > 1e-6) {
+        var factor = 1 + calib.distort * r;
+        cx *= factor;
+        cy *= factor;
+      }
+    }
+
+    let dx = cx * calib.scale * side;
+    let dy = cy * calib.scale * side;
 
     if (calib.rotate !== 0) {
       const cos = Math.cos(calib.rotate);
@@ -127,63 +156,117 @@
 
   function drawLaserTrail(id, points, coreColor, glowColor) {
     if (points.length < 2) return;
-    const positions = points.map((p) => normToCanvas(p.nx, p.ny));
+    var positions = points.map(function (p) { return normToCanvas(p.nx, p.ny); });
+    var trail = config.trail || {};
+    var gwMax = trail.glowWidthMax ?? 32;
+    var cwMax = trail.coreWidthMax ?? 16;
+    var n = positions.length;
 
-    for (let i = 0; i < positions.length - 1; i++) {
-      const t = (i + 1) / positions.length;
-      const start = positions[i];
-      const end = positions[i + 1];
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const perpX = -dy / len;
-      const perpY = dx / len;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-      const trail = config.trail || {};
-      const glowWidth = (trail.glowWidthMin ?? 6) + ((trail.glowWidthMax ?? 20) - (trail.glowWidthMin ?? 6)) * t;
-      const coreWidth = (trail.coreWidthMin ?? 1) + ((trail.coreWidthMax ?? 3) - (trail.coreWidthMin ?? 1)) * t;
-
-      ctx.save();
-      ctx.globalAlpha = t * 0.9;
-
+    /* Layer 1: outer bloom (wide, soft, dim) */
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = trail.bloomBlur ?? 18;
+    for (var i = 0; i < n - 1; i++) {
+      var t = (i + 1) / n;
+      var t3 = t * t * t;
+      ctx.globalAlpha = t3 * 0.35;
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = gwMax * t3;
       ctx.beginPath();
-      ctx.moveTo(start.x + perpX * glowWidth, start.y + perpY * glowWidth);
-      ctx.lineTo(end.x + perpX * glowWidth, end.y + perpY * glowWidth);
-      ctx.lineTo(end.x - perpX * glowWidth, end.y - perpY * glowWidth);
-      ctx.lineTo(start.x - perpX * glowWidth, start.y - perpY * glowWidth);
-      ctx.closePath();
-      const glowGrad = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
-      glowGrad.addColorStop(0, glowColor.replace(/[\d.]+\)$/, "0)"));
-      glowGrad.addColorStop(0.5, glowColor);
-      glowGrad.addColorStop(1, glowColor.replace(/[\d.]+\)$/, "0)"));
-      ctx.fillStyle = glowGrad;
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(start.x + perpX * coreWidth, start.y + perpY * coreWidth);
-      ctx.lineTo(end.x + perpX * coreWidth, end.y + perpY * coreWidth);
-      ctx.lineTo(end.x - perpX * coreWidth, end.y - perpY * coreWidth);
-      ctx.lineTo(start.x - perpX * coreWidth, start.y - perpY * coreWidth);
-      ctx.closePath();
-      ctx.fillStyle = coreColor;
-      ctx.fill();
-
-      ctx.restore();
+      ctx.moveTo(positions[i].x, positions[i].y);
+      ctx.lineTo(positions[i + 1].x, positions[i + 1].y);
+      ctx.stroke();
     }
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+
+    /* Layer 2: mid glow (colored, medium width) */
+    for (var i = 0; i < n - 1; i++) {
+      var t = (i + 1) / n;
+      var t2 = t * t;
+      ctx.globalAlpha = t2 * 0.7;
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = (gwMax * 0.5) * t2;
+      ctx.beginPath();
+      ctx.moveTo(positions[i].x, positions[i].y);
+      ctx.lineTo(positions[i + 1].x, positions[i + 1].y);
+      ctx.stroke();
+    }
+
+    /* Layer 3: hot core (white-ish, thin, bright) */
+    for (var i = 0; i < n - 1; i++) {
+      var t = (i + 1) / n;
+      var t2 = t * t;
+      ctx.globalAlpha = t2 * 0.95;
+      ctx.strokeStyle = coreColor;
+      ctx.lineWidth = cwMax * t2;
+      ctx.beginPath();
+      ctx.moveTo(positions[i].x, positions[i].y);
+      ctx.lineTo(positions[i + 1].x, positions[i + 1].y);
+      ctx.stroke();
+    }
+
+    /* Layer 4: white-hot center line (very thin, full bright at head) */
+    for (var i = Math.max(0, n - 6); i < n - 1; i++) {
+      var t = (i + 1) / n;
+      ctx.globalAlpha = t;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = Math.max(2, cwMax * 0.3 * t);
+      ctx.beginPath();
+      ctx.moveTo(positions[i].x, positions[i].y);
+      ctx.lineTo(positions[i + 1].x, positions[i + 1].y);
+      ctx.stroke();
+    }
+
     ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
-  function drawBeyGlow(nx, ny, color, radiusNorm) {
-    const { x, y } = normToCanvas(nx, ny);
-    const r = Math.max(8, radiusNorm * 2);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, color);
-    grad.addColorStop(0.5, color.replace("1)", "0.4)"));
-    grad.addColorStop(1, "rgba(255,255,255,0)");
+  function drawBeyGlow(nx, ny, color, radiusNorm, speed) {
+    var pos = normToCanvas(nx, ny);
+    var x = pos.x, y = pos.y;
+    var glow = config.beyGlow || {};
+    var baseR = glow.baseRadius ?? 35;
+    var speedScale = glow.speedScale ?? 0.3;
+    var spd = speed || 0;
+    var r = baseR + spd * speedScale;
+
+    ctx.save();
+
+    /* Outer bloom via shadowBlur -- very visible on projectors */
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glow.bloomBlur ?? 30;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    /* Main radial gradient glow */
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    var grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, "#fff");
+    grad.addColorStop(0.15, color);
+    grad.addColorStop(0.5, color.replace(/[\d.]+\)$/, "0.4)"));
+    grad.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
+
+    /* Bright center dot */
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(3, r * 0.12), 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+
+    ctx.restore();
   }
 
   function drawAlignmentCross() {
@@ -259,6 +342,24 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
+    /* Distortion guide rings -- show where 25/50/75% radius land after
+     * the radial correction, so the user can see the bowl warp in action. */
+    if (calib.distort !== 0) {
+      var rings = [0.25, 0.5, 0.75];
+      ctx.setLineDash([4, 6]);
+      for (var ri = 0; ri < rings.length; ri++) {
+        var normR = rings[ri] * 0.5;
+        var distR = normR * (1 + calib.distort * normR);
+        var ringPx = distR * calib.scale * side;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringPx, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 180, 0, 0.35)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
     /* Center crosshair */
     const ch = 18;
     ctx.beginPath();
@@ -300,32 +401,6 @@
       ctx.fill();
     }
 
-    /* Pocket arrow -- points outward at 12 o'clock (before rotation).
-     * Rotate with R/E until it matches the physical pocket. */
-    const pocketAngle = rot - Math.PI / 2;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(pocketAngle);
-
-    const arrowTip = -r * 1.14;
-    const arrowBase = -r * 0.92;
-    const arrowHalf = r * 0.06;
-
-    ctx.beginPath();
-    ctx.moveTo(0, arrowTip);
-    ctx.lineTo(-arrowHalf, arrowBase);
-    ctx.lineTo(arrowHalf, arrowBase);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(255, 200, 0, 0.9)";
-    ctx.fill();
-
-    ctx.font = "11px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("POCKET", 0, arrowTip - 12);
-
-    ctx.restore();
-
     /* Flip indicators */
     if (flipX || flipY) {
       ctx.font = "bold 16px monospace";
@@ -363,37 +438,90 @@
       ctx.fillText(m.label, p.x, p.y - 14);
     }
 
-    /* Pocket marker via normToCanvas -- if core sends pocketAngleRad,
-     * show where the pocket should project */
-    if (state.pocketAngleRad != null) {
-      const pa = state.pocketAngleRad;
-      const pnx = 0.5 + 0.5 * Math.cos(pa);
-      const pny = 0.5 + 0.5 * Math.sin(pa);
-      const pp = normToCanvas(pnx, pny);
-      ctx.beginPath();
-      ctx.arc(pp.x, pp.y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255, 100, 0, 0.9)";
-      ctx.fill();
-      ctx.fillStyle = "#ff6400";
-      ctx.fillText("POCKET(cam)", pp.x, pp.y - 16);
-    }
     ctx.restore();
 
+    drawReferenceMarkers();
     updateCalibHud();
+  }
+
+  function drawReferenceMarkers() {
+    var mCfg = config.markers || {};
+    var rimColor = mCfg.rimColor || "rgba(0, 255, 100, 0.9)";
+    var innerColor = mCfg.innerColor || "rgba(0, 200, 255, 0.8)";
+    var centerColor = mCfg.centerColor || "rgba(255, 255, 0, 1)";
+    var pocketColor = mCfg.pocketColor || "rgba(255, 100, 0, 1)";
+    var markerSize = mCfg.size || 7;
+
+    var refs = state.referenceMarkers;
+    if (!refs || refs.length === 0) return;
+
+    ctx.save();
+    ctx.font = "bold 10px monospace";
+    ctx.textAlign = "center";
+
+    for (var i = 0; i < refs.length; i++) {
+      var mk = refs[i];
+      var p = normToCanvas(mk.nx, mk.ny);
+      var color;
+      var sz = markerSize;
+      var label = "";
+
+      if (mk.name === "center") {
+        color = centerColor;
+        sz = markerSize + 2;
+        label = "CTR";
+      } else if (mk.name === "pocket") {
+        continue;
+      } else if (mk.name.indexOf("rim") === 0) {
+        color = rimColor;
+        label = mk.name.replace("rim", "").substring(0, 1);
+      } else {
+        color = innerColor;
+        sz = markerSize - 2;
+      }
+
+      /* Diamond shape for core markers */
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - sz);
+      ctx.lineTo(p.x + sz, p.y);
+      ctx.lineTo(p.x, p.y + sz);
+      ctx.lineTo(p.x - sz, p.y);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (label) {
+        ctx.fillStyle = color;
+        ctx.fillText(label, p.x, p.y - sz - 6);
+      }
+    }
+    ctx.restore();
   }
 
   function updateCalibHud() {
     const deg = (calib.rotate * 180 / Math.PI).toFixed(1);
     const url = buildCalibURL();
+    var modeTag = markerOnlyMode ? " <b>[MARKERS ONLY]</b>" : "";
     calibHud.innerHTML =
-      "-- CALIBRATION (C to toggle) --<br>" +
+      "-- CALIBRATION (C to toggle) --" + modeTag + "<br>" +
       "Arrows: move &nbsp; +/-: scale<br>" +
-      "R/E: rotate &nbsp; Shift: fine<br>" +
-      "Q: flip X &nbsp; W: flip Y<br><br>" +
+      "R/E: rotate &nbsp; K/L: bowl distortion &nbsp; 0: reset dist<br>" +
+      "Q: flip X &nbsp; W: flip Y &nbsp; M: markers only &nbsp; Shift: fine<br>" +
+      "<br>" +
+      "<b>Step 1:</b> +/- until circle matches stadium rim<br>" +
+      "<b>Step 2:</b> Arrows until CTR lands on center<br>" +
+      "<b>Step 3:</b> R/E to match TOP/BOT/LEFT/RIGHT orientation<br>" +
+      "<b>Step 4:</b> Q/W if trails move opposite<br>" +
+      "<b>Step 5:</b> K/L to fix rim markers (bowl curve correction)<br>" +
+      "<br>" +
       "scale=" + calib.scale.toFixed(2) +
       " &nbsp;offX=" + calib.offsetX.toFixed(2) +
       " &nbsp;offY=" + calib.offsetY.toFixed(2) +
       " &nbsp;rot=" + deg +
+      " &nbsp;dist=" + calib.distort.toFixed(2) +
       " &nbsp;flipX=" + flipX +
       " &nbsp;flipY=" + flipY + "<br><br>" +
       '<a href="' + url + '">' + url + "</a>";
@@ -409,6 +537,7 @@
     p.set("offsetY", calib.offsetY.toFixed(2));
     const deg = calib.rotate * 180 / Math.PI;
     if (Math.abs(deg) > 0.05) p.set("rotate", deg.toFixed(1));
+    if (Math.abs(calib.distort) > 0.01) p.set("distort", calib.distort.toFixed(2));
     return base + "?" + p.toString();
   }
 
@@ -431,8 +560,26 @@
       handled = true;
     }
 
+    if (e.key === "m" || e.key === "M") {
+      markerOnlyMode = !markerOnlyMode;
+      if (markerOnlyMode && !calib.active) {
+        calib.active = true;
+        calibHud.className = "";
+      }
+      handled = true;
+    }
+
     if (e.key === "q" || e.key === "Q") { flipX = !flipX; handled = true; }
     if (e.key === "w" || e.key === "W") { flipY = !flipY; handled = true; }
+    if (e.key === "k" || e.key === "K") {
+      calib.distort = Math.max(-4, calib.distort - (e.shiftKey ? 0.02 : 0.1));
+      handled = true;
+    }
+    if (e.key === "l" || e.key === "L") {
+      calib.distort = Math.min(4, calib.distort + (e.shiftKey ? 0.02 : 0.1));
+      handled = true;
+    }
+    if (e.key === "0") { calib.distort = 0; handled = true; }
 
     if (!calib.active) {
       if (handled) { e.preventDefault(); saveCalibSession(); }
@@ -457,28 +604,76 @@
   });
 
   function drawImpact(nx, ny, progress) {
-    const { x, y } = normToCanvas(nx, ny);
-    const impact = config.impact || {};
-    const r = (impact.radiusStart ?? 40) + progress * ((impact.radiusEnd ?? 140) - (impact.radiusStart ?? 40));
-    const rayCount = impact.rayCount ?? 24;
-    const baseColor = impact.strokeColor || "rgba(255, 200, 100, 1)";
-    const alpha = 1 - progress;
+    var pos = normToCanvas(nx, ny);
+    var x = pos.x, y = pos.y;
+    var impact = config.impact || {};
+    var rStart = impact.radiusStart ?? 40;
+    var rEnd = impact.radiusEnd ?? 120;
+    var r = rStart + progress * (rEnd - rStart);
+    var rayCount = impact.rayCount ?? 16;
+    var baseColor = impact.strokeColor || "rgba(255, 220, 100, 1)";
+    var alpha = 1 - progress;
 
     ctx.save();
-    ctx.strokeStyle = baseColor.replace(/[\d.]+\)$/, alpha + ")");
-    ctx.lineWidth = impact.lineWidth ?? 2;
-    ctx.lineCap = "round";
 
-    for (let i = 0; i < rayCount; i++) {
-      const angle = (Math.PI * 2 * i) / rayCount;
-      const lenVariation = 0.5 + 0.5 * (Math.sin(i * 1.7) * 0.5 + 0.5);
-      const rayLen = r * lenVariation;
+    /* Central flash (brief bright pop, fades quickly) */
+    if (progress < 0.15) {
+      var flashAlpha = (1 - progress / 0.15) * 0.45;
+      var flashR = rStart * (0.5 + progress);
+      ctx.globalAlpha = flashAlpha;
+      var flashGrad = ctx.createRadialGradient(x, y, 0, x, y, flashR);
+      flashGrad.addColorStop(0, "#fff");
+      flashGrad.addColorStop(0.4, baseColor);
+      flashGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = flashGrad;
       ctx.beginPath();
-      ctx.moveTo(x, y);
+      ctx.arc(x, y, flashR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    /* Expanding rays with varied lengths */
+    ctx.globalAlpha = alpha;
+    ctx.lineCap = "round";
+    ctx.shadowColor = baseColor;
+    ctx.shadowBlur = 12 * alpha;
+
+    for (var i = 0; i < rayCount; i++) {
+      var angle = (Math.PI * 2 * i) / rayCount;
+      var lenVariation = 0.5 + 0.5 * Math.abs(Math.sin(i * 2.3 + progress * 4));
+      var rayLen = r * lenVariation;
+      var innerR = r * 0.3 * progress;
+      ctx.strokeStyle = baseColor.replace(/[\d.]+\)$/, alpha + ")");
+      ctx.lineWidth = (impact.lineWidth ?? 3) * (1 - progress * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(angle) * innerR, y + Math.sin(angle) * innerR);
       ctx.lineTo(x + Math.cos(angle) * rayLen, y + Math.sin(angle) * rayLen);
       ctx.stroke();
     }
+
+    /* Expanding ring */
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = baseColor.replace(/[\d.]+\)$/, (alpha * 0.6) + ")");
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.8, 0, Math.PI * 2);
+    ctx.stroke();
+
     ctx.restore();
+  }
+
+  function extrapolatedPosition(b, dtSec) {
+    if (!dtSec || dtSec <= 0 || (!b.vx && !b.vy)) return { nx: b.nx, ny: b.ny };
+    var divisor;
+    if (state.stadiumRelative && state.arenaRadiusPx > 0) {
+      divisor = 2 * state.arenaRadiusPx;
+    }
+    var vnx = (b.vx || 0) / (divisor || state.frameWidth || 1);
+    var vny = (b.vy || 0) / (divisor || state.frameHeight || 1);
+    var nx = b.nx + vnx * dtSec * EXTRAPOLATION_FACTOR;
+    var ny = b.ny + vny * dtSec * EXTRAPOLATION_FACTOR;
+    return { nx: Math.max(0, Math.min(1, nx)), ny: Math.max(0, Math.min(1, ny)) };
   }
 
   function render() {
@@ -486,38 +681,51 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const now = Date.now();
+    const nowPerf = performance.now();
+    const dtSec = lastMessageTime > 0 ? (nowPerf - lastMessageTime) / 1000 : 0;
 
-    const laserRed = config.laserRed || { core: "rgba(255, 50, 50, 1)", glow: "rgba(255, 80, 80, 0.6)", beyGlow: "rgba(255, 80, 80, 1)" };
-    const laserBlue = config.laserBlue || { core: "rgba(80, 150, 255, 1)", glow: "rgba(100, 180, 255, 0.6)", beyGlow: "rgba(100, 180, 255, 1)" };
+    if (!markerOnlyMode) {
+      const laserRed = config.laserRed || { core: "rgba(255, 50, 50, 1)", glow: "rgba(255, 80, 80, 0.6)", beyGlow: "rgba(255, 80, 80, 1)" };
+      const laserBlue = config.laserBlue || { core: "rgba(80, 150, 255, 1)", glow: "rgba(100, 180, 255, 0.6)", beyGlow: "rgba(100, 180, 255, 1)" };
 
-    for (const b of state.beys) {
-      const laser = b.id === 0 ? laserRed : laserBlue;
-      drawBeyGlow(b.nx, b.ny, laser.beyGlow || laser.glow, 0.03);
-    }
-
-    if (lastTrailUpdate > 0 && now - lastTrailUpdate > TRAIL_STALE_MS) {
-      clearTrails();
-      lastTrailUpdate = 0;
-    }
-
-    for (let id of [0, 1]) {
-      const arr = trails[id];
-      if (arr.length > 0) {
-        const laser = id === 0 ? laserRed : laserBlue;
-        drawLaserTrail(id, arr, laser.core, laser.glow);
+      for (const b of state.beys) {
+        const laser = b.id === 0 ? laserRed : laserBlue;
+        const ep = extrapolatedPosition(b, dtSec);
+        drawBeyGlow(ep.nx, ep.ny, laser.beyGlow || laser.glow, 0, b.speed || 0);
       }
-    }
 
-    if (state.collision) {
-      impactStart = now;
-    }
-    if (impactStart > 0) {
-      const elapsed = now - impactStart;
-      if (elapsed < IMPACT_DURATION_MS) {
-        const progress = elapsed / IMPACT_DURATION_MS;
-        drawImpact(state.impactCenter.nx, state.impactCenter.ny, progress);
-      } else {
-        impactStart = 0;
+      if (lastTrailUpdate > 0 && now - lastTrailUpdate > TRAIL_STALE_MS) {
+        clearTrails();
+        lastTrailUpdate = 0;
+      }
+
+      for (let id of [0, 1]) {
+        const arr = trails[id];
+        if (arr.length > 0) {
+          const laser = id === 0 ? laserRed : laserBlue;
+          const b = state.beys.find(function (x) { return x.id === id; });
+          if (b && dtSec > 0) {
+            const ep = extrapolatedPosition(b, dtSec);
+            var drawArr = arr.concat(ep);
+            if (drawArr.length > TRAIL_MAX_LEN) drawArr = drawArr.slice(drawArr.length - TRAIL_MAX_LEN);
+            drawLaserTrail(id, drawArr, laser.core, laser.glow);
+          } else {
+            drawLaserTrail(id, arr, laser.core, laser.glow);
+          }
+        }
+      }
+
+      if (state.collision) {
+        impactStart = now;
+      }
+      if (impactStart > 0) {
+        const elapsed = now - impactStart;
+        if (elapsed < IMPACT_DURATION_MS) {
+          const progress = elapsed / IMPACT_DURATION_MS;
+          drawImpact(state.impactCenter.nx, state.impactCenter.ny, progress);
+        } else {
+          impactStart = 0;
+        }
       }
     }
 
@@ -527,6 +735,8 @@
 
     if (calib.active) {
       drawCalibrationOverlay();
+    } else if (markerOnlyMode) {
+      drawReferenceMarkers();
     }
 
     updateCalibInfo();
@@ -543,6 +753,11 @@
       state.impactCenter = data.impactCenter || { nx: 0.5, ny: 0.5 };
       state.stadiumRelative = !!data.stadiumRelative;
       if (data.pocketAngleRad != null) state.pocketAngleRad = data.pocketAngleRad;
+      if (data.referenceMarkers) state.referenceMarkers = data.referenceMarkers;
+      if (data.arenaRadiusPx) state.arenaRadiusPx = data.arenaRadiusPx;
+
+      lastMessageTime = performance.now();
+      if (data.timestamp) serverTimestamp = data.timestamp;
 
       for (const b of state.beys) {
         const arr = trails[b.id] || (trails[b.id] = []);

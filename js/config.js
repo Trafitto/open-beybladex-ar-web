@@ -4,41 +4,61 @@
  * No build step required: reload the page to apply changes.
  */
 var BEYBLADE_EFFECT_CONFIG = {
-  /* Maximum number of points kept in the trail per beyblade (longer = longer trail) */
-  trailMaxLength: 18,
+  /* Trail history length (more points = longer tail) */
+  trailMaxLength: 24,
 
   /* Impact flash duration in milliseconds */
-  impactDurationMs: 200,
+  impactDurationMs: 300,
 
-  /* Laser trail: beyblade id 0 (first) - hot magenta */
+  /* Laser trail: beyblade id 0 (first) - hot magenta / pink energy */
   laserRed: {
-    core: "rgba(255, 0, 255, 1)",
-    glow: "rgba(255, 100, 255, 0.7)",
-    beyGlow: "rgba(255, 50, 255, 1)"
+    core: "rgba(255, 220, 255, 1)",
+    glow: "rgba(255, 0, 200, 0.8)",
+    beyGlow: "rgba(255, 0, 200, 1)"
   },
 
-  /* Laser trail: beyblade id 1 (second) - electric cyan */
+  /* Laser trail: beyblade id 1 (second) - electric cyan / blue energy */
   laserBlue: {
-    core: "rgba(0, 255, 255, 1)",
-    glow: "rgba(100, 255, 255, 0.7)",
-    beyGlow: "rgba(50, 255, 255, 1)"
+    core: "rgba(220, 255, 255, 1)",
+    glow: "rgba(0, 180, 255, 0.8)",
+    beyGlow: "rgba(0, 180, 255, 1)"
   },
 
-  /* Trail thickness: core base/peak width, glow base/peak width (in pixels).
-   * Thicker values keep effects visible when projection focus is uneven. */
+  /* Trail rendering: anime-style energy beam.
+   * coreWidthMax: peak width of the bright center line at the head
+   * glowWidthMax: peak width of the outer colored glow at the head
+   * bloomBlur: soft bloom radius (projector-friendly glow) */
   trail: {
-    coreWidthMin: 8,
-    coreWidthMax: 16,
-    glowWidthMin: 18,
-    glowWidthMax: 32
+    coreWidthMax: 10,
+    glowWidthMax: 28,
+    bloomBlur: 22
   },
 
-  /* Collision impact: radiating spark lines (explosion-style) */
+  /* Bey glow: the bright aura around each tracked beyblade.
+   * baseRadius: minimum glow radius in pixels (must be big for projectors)
+   * speedScale: extra radius per unit speed (faster = bigger glow)
+   * bloomBlur: soft outer bloom via CSS shadow (very visible on projectors) */
+  beyGlow: {
+    baseRadius: 35,
+    speedScale: 0.3,
+    bloomBlur: 30
+  },
+
+  /* Collision impact: radiating spark lines */
   impact: {
-    radiusStart: 30,
-    radiusEnd: 100,
-    rayCount: 12,
-    strokeColor: "rgba(255, 200, 100, 1)",
-    lineWidth: 2
+    radiusStart: 40,
+    radiusEnd: 120,
+    rayCount: 16,
+    strokeColor: "rgba(255, 220, 100, 1)",
+    lineWidth: 3
+  },
+
+  /* Alignment reference markers (calibration mode: C key, marker-only: M key) */
+  markers: {
+    rimColor: "rgba(0, 255, 100, 0.9)",
+    innerColor: "rgba(0, 200, 255, 0.8)",
+    centerColor: "rgba(255, 255, 0, 1)",
+    pocketColor: "rgba(255, 100, 0, 1)",
+    size: 7
   }
 };
