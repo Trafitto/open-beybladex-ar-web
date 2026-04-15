@@ -60,5 +60,25 @@ var BEYBLADE_EFFECT_CONFIG = {
     centerColor: "rgba(255, 255, 0, 1)",
     pocketColor: "rgba(255, 100, 0, 1)",
     size: 7
+  },
+
+  /* Play-mode countdown: stadium split + text overlay */
+  countdown: {
+    leftColor:  "rgba(255, 0, 200, 0.18)",
+    rightColor: "rgba(0, 180, 255, 0.18)",
+    lineColor:  "rgba(255, 255, 255, 0.6)",
+    lineWidth:  3,
+    fontFamily: "'Black Ops One', Impact, 'Arial Black', sans-serif",
+    fontSize:   130,
+    textColor:  "#fff",
+    textGlow:   "rgba(255, 255, 255, 0.8)",
+    textBloom:  40,
+    strokeColor: "rgba(0, 0, 0, 0.9)",
+    strokeWidth: 6,
+    skewX:      -0.15,
+    lancioColor: "rgba(255, 220, 100, 1)",
+    lancioGlow:  "rgba(255, 180, 0, 0.9)",
+    lancioStroke: "rgba(180, 80, 0, 0.9)",
+    mirror:     true
   }
 };

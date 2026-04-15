@@ -78,6 +78,11 @@
 
   let lastMessageTime = 0;
   let serverTimestamp = 0;
+
+  /* Play-mode countdown state (populated from server payloads) */
+  let playMode = null;
+  let countdownPhaseStart = 0;
+  let prevCountdownPhase = null;
   /* Fraction of velocity used for extrapolation (0 = disabled, 1 = full).
    * Keep < 1 to avoid overshooting on sudden direction changes. */
   const EXTRAPOLATION_FACTOR = 0.65;
@@ -603,6 +608,121 @@
     }
   });
 
+  /* ── Play-mode countdown: stadium split + text ────────────────────── */
+
+  function drawCountdownSplit() {
+    if (!playMode || !playMode.active) return;
+    var cd = config.countdown || {};
+    var center = normToCanvas(0.5, 0.5);
+    var rimPt = normToCanvas(0.5, 0.0);
+    var arenaR = Math.abs(rimPt.y - center.y);
+    var cx = center.x;
+    var cy = center.y;
+
+    ctx.save();
+
+    /* Mirror horizontally for under-stadium projection */
+    if (cd.mirror) {
+      ctx.translate(cx, cy);
+      ctx.scale(-1, 1);
+      ctx.translate(-cx, -cy);
+    }
+
+    /* Left semicircle (pi/2 .. 3pi/2 = left half) */
+    ctx.beginPath();
+    ctx.arc(cx, cy, arenaR, Math.PI * 0.5, Math.PI * 1.5);
+    ctx.closePath();
+    ctx.fillStyle = cd.leftColor || "rgba(255, 0, 200, 0.18)";
+    ctx.fill();
+
+    /* Right semicircle (-pi/2 .. pi/2 = right half) */
+    ctx.beginPath();
+    ctx.arc(cx, cy, arenaR, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = cd.rightColor || "rgba(0, 180, 255, 0.18)";
+    ctx.fill();
+
+    /* Vertical dividing line */
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - arenaR);
+    ctx.lineTo(cx, cy + arenaR);
+    ctx.strokeStyle = cd.lineColor || "rgba(255, 255, 255, 0.6)";
+    ctx.lineWidth = cd.lineWidth || 3;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawCountdownText() {
+    if (!playMode || !playMode.active || !playMode.text) return;
+    var cd = config.countdown || {};
+    var center = normToCanvas(0.5, 0.5);
+    var baseFontSize = cd.fontSize || 130;
+    var isLancio = playMode.phase === "lancio";
+
+    /* Scale-in animation: text pops from 0 -> 1 over 200ms on each new phase */
+    var elapsed = performance.now() - countdownPhaseStart;
+    var scalePop = Math.min(1.0, elapsed / 200);
+    /* Ease-out quad */
+    scalePop = 1 - (1 - scalePop) * (1 - scalePop);
+
+    var fontSize = Math.round(baseFontSize * scalePop);
+    if (fontSize < 4) return;
+
+    var textColor = isLancio
+      ? (cd.lancioColor || "rgba(255, 220, 100, 1)")
+      : (cd.textColor || "#fff");
+    var glowColor = isLancio
+      ? (cd.lancioGlow || "rgba(255, 180, 0, 0.9)")
+      : (cd.textGlow || "rgba(255, 255, 255, 0.8)");
+    var strokeColor = isLancio
+      ? (cd.lancioStroke || "rgba(180, 80, 0, 0.9)")
+      : (cd.strokeColor || "rgba(0, 0, 0, 0.9)");
+
+    ctx.save();
+
+    /* Mirror horizontally for under-stadium projection */
+    if (cd.mirror) {
+      ctx.translate(center.x, center.y);
+      ctx.scale(-1, 1);
+      ctx.translate(-center.x, -center.y);
+    }
+
+    /* Italic skew for dynamic anime feel */
+    var skew = cd.skewX || 0;
+    if (skew) {
+      ctx.translate(center.x, center.y);
+      ctx.transform(1, 0, skew, 1, 0, 0);
+      ctx.translate(-center.x, -center.y);
+    }
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = fontSize + "px " + (cd.fontFamily || "'Black Ops One', Impact, sans-serif");
+
+    /* Glow layer */
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = cd.textBloom || 40;
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = textColor;
+    ctx.fillText(playMode.text, center.x, center.y);
+
+    /* Stroke outline for anime punch */
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = cd.strokeWidth || 6;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineJoin = "round";
+    ctx.strokeText(playMode.text, center.x, center.y);
+
+    /* Crisp fill on top */
+    ctx.fillStyle = textColor;
+    ctx.fillText(playMode.text, center.x, center.y);
+
+    ctx.restore();
+  }
+
   function drawImpact(nx, ny, progress) {
     var pos = normToCanvas(nx, ny);
     var x = pos.x, y = pos.y;
@@ -684,7 +804,14 @@
     const nowPerf = performance.now();
     const dtSec = lastMessageTime > 0 ? (nowPerf - lastMessageTime) / 1000 : 0;
 
-    if (!markerOnlyMode) {
+    var countdownActive = playMode && playMode.active;
+
+    if (countdownActive) {
+      drawCountdownSplit();
+      drawCountdownText();
+    }
+
+    if (!markerOnlyMode && !countdownActive) {
       const laserRed = config.laserRed || { core: "rgba(255, 50, 50, 1)", glow: "rgba(255, 80, 80, 0.6)", beyGlow: "rgba(255, 80, 80, 1)" };
       const laserBlue = config.laserBlue || { core: "rgba(80, 150, 255, 1)", glow: "rgba(100, 180, 255, 0.6)", beyGlow: "rgba(100, 180, 255, 1)" };
 
@@ -755,6 +882,17 @@
       if (data.pocketAngleRad != null) state.pocketAngleRad = data.pocketAngleRad;
       if (data.referenceMarkers) state.referenceMarkers = data.referenceMarkers;
       if (data.arenaRadiusPx) state.arenaRadiusPx = data.arenaRadiusPx;
+
+      if (data.playMode) {
+        playMode = data.playMode;
+        if (playMode.phase !== prevCountdownPhase) {
+          prevCountdownPhase = playMode.phase;
+          countdownPhaseStart = performance.now();
+        }
+      } else {
+        playMode = null;
+        prevCountdownPhase = null;
+      }
 
       lastMessageTime = performance.now();
       if (data.timestamp) serverTimestamp = data.timestamp;
