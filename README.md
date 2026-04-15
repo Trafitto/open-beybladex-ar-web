@@ -6,6 +6,9 @@ Web-based SFX projection for [open_beybladex_ar_core](https://github.com/Trafitt
 
 ![WIP demo](demo/demo_wip.gif)
 
+This is the countdown projected at the start of the match
+![Countdown](demo/countdown_beyblade.gif)
+
 ## Setup
 
 1. **Run the [core tracker](https://github.com/Trafitto/open-beybladex-ar-core) with `--web`:**
