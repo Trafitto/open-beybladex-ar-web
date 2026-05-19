@@ -681,12 +681,7 @@
 
     ctx.save();
 
-    /* Mirror horizontally for under-stadium projection */
-    if (cd.mirror) {
-      ctx.translate(center.x, center.y);
-      ctx.scale(-1, 1);
-      ctx.translate(-center.x, -center.y);
-    }
+    ctx.direction = "ltr";
 
     /* Italic skew for dynamic anime feel */
     var skew = cd.skewX || 0;
@@ -797,6 +792,7 @@
   }
 
   function render() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 

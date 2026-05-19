@@ -29,6 +29,8 @@ This is the countdown projected at the start of the match
 
 ## Query params
 
+Hard-refresh (`Ctrl+Shift+R`) once after upgrading so the browser does not reuse an older `js/app.js` from cache (script URLs are versioned).
+
 - `?flipY=1` - Flip Y axis (for bottom projector projecting upward)
 - `?scale=0.85` - Scale the projection (default 1)
 - `?offsetX=0.1` / `?offsetY=-0.05` - Shift projection
@@ -54,7 +56,10 @@ The overlay shows a URL with your current settings. Copy it and use it next time
 |------|-----|
 | `index.html` | Entry point |
 | `css/style.css` | Fullscreen canvas, status |
+| `js/config.js` | Effect tuning (trail colors, play-mode countdown, etc.) |
 | `js/app.js` | WebSocket client, trail/glow/impact rendering |
+
+Play-mode countdown: `BEYBLADE_EFFECT_CONFIG.countdown.mirror` in `js/config.js` flips the pink/blue half overlay horizontally only so it can line up under some projectors. Countdown lettering is drawn without that flip.
 
 ## Early demos
 

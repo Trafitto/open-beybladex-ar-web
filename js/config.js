@@ -79,6 +79,6 @@ var BEYBLADE_EFFECT_CONFIG = {
     lancioColor: "rgba(255, 220, 100, 1)",
     lancioGlow:  "rgba(255, 180, 0, 0.9)",
     lancioStroke: "rgba(180, 80, 0, 0.9)",
-    mirror:     true
+    mirror:     false
   }
 };
